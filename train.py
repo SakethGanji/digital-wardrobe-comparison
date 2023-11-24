@@ -1,23 +1,23 @@
 import os
 import torch
 import torch.nn as nn
-from vgg16_model import VGG16
+from model import EfficientNetB0
 from data import data_loader
 
-num_classes = 20
+num_classes = 143
 num_epochs = 40
 batch_size = 8
 learning_rate = 0.001
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-model = VGG16(num_classes).to(device)
+model = EfficientNetB0(num_classes).to(device)
 
 criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay = 0.005, momentum = 0.9)
 
-csv_file_path = './images.csv'
 train_loader, valid_loader = data_loader(
-    csv_file='images.csv',
+    csv_file='styles.csv',
     data_dir='/workspace/digital-wardrobe-recommendation',
     batch_size=batch_size
 )
@@ -44,6 +44,7 @@ for epoch in range(num_epochs):
     print ('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'
                    .format(epoch+1, num_epochs, i+1, total_step, loss.item()))
 
-model_save_path = '/workspace/digital-wardrobe-recommendation/saved_models/vgg16_trained_model.pth'
+model_save_path = '/workspace/digital-wardrobe-recommendation/saved_models/efficientnet_trained_model.pth'  # Updated save path
 os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
 torch.save(model.state_dict(), model_save_path)
+

@@ -24,28 +24,29 @@ class LabelEncoder:
 
 class CustomDataset(Dataset):
     def __init__(self, csv_file, data_dir, transform=None):
-
-        self.data_frame = pd.read_csv(csv_file)
+        self.data_frame = pd.read_csv(csv_file, on_bad_lines='skip')
         self.data_dir = data_dir
         self.transform = transform
-        self.label_encoder = LabelEncoder(self.data_frame['label'])
+        self.label_encoder = LabelEncoder(self.data_frame['articleType'])
 
     def __len__(self):
         return len(self.data_frame)
 
     def __getitem__(self, idx):
-        img_name = os.path.join(self.data_dir, 'images', f"{self.data_frame.iloc[idx, 0]}.jpg")
-        image = Image.open(img_name)
+        img_id = self.data_frame.iloc[idx, 0]
+        img_name = os.path.join(self.data_dir, 'images', f"{img_id}.jpg")
+        image = Image.open(img_name).convert('RGB')
 
         if self.transform:
             image = self.transform(image)
 
-        label_str = self.data_frame.iloc[idx, 2]
+        label_str = self.data_frame.iloc[idx, 4]
         label_int = self.label_encoder.encode(label_str)
         self.label_encoder.save_mapping('label_mapping.json')
         label_tensor = torch.tensor(label_int, dtype=torch.long)
 
         return image, label_tensor
+
 
 def data_loader(csv_file,
                 data_dir,
@@ -60,10 +61,11 @@ def data_loader(csv_file,
     )
 
     transform = transforms.Compose([
-        transforms.Resize((227, 227)),
+        transforms.Resize((224, 224)),
         transforms.ToTensor(),
         normalize,
     ])
+
 
     if test:
         test_dataset = CustomDataset(csv_file=csv_file, data_dir=data_dir, transform=transform)
