@@ -7,27 +7,61 @@ from torchvision import transforms
 import numpy as np
 import json
 
+
 class LabelEncoder:
-    def __init__(self, labels):
-        self.label_to_idx = {label: idx for idx, label in enumerate(sorted(set(labels)))}
+    def __init__(self):
+        self.label_to_idx = {}
+        self.idx_to_label = {}
+
+    def fit(self, labels):
+        unique_labels = sorted(set(labels))
+        self.label_to_idx = {label: idx for idx, label in enumerate(unique_labels)}
         self.idx_to_label = {idx: label for label, idx in self.label_to_idx.items()}
 
     def encode(self, label):
-        return self.label_to_idx[label]
+        return self.label_to_idx.get(label, -1)
 
     def decode(self, idx):
-        return self.idx_to_label[idx]
+        return self.idx_to_label.get(idx, 'Unknown')
 
-    def save_mapping(self, file_path):
+    @staticmethod
+    def save_all_mappings(encoders, file_path):
+        all_mappings = {col: {'label_to_idx': encoder.label_to_idx, 'idx_to_label': encoder.idx_to_label}
+                        for col, encoder in encoders.items()}
         with open(file_path, 'w') as file:
-            json.dump(self.idx_to_label, file, indent=4)
+            json.dump(all_mappings, file, indent=4)
+
+    @staticmethod
+    def load_all_mappings(file_path):
+        with open(file_path, 'r') as file:
+            all_mappings = json.load(file)
+        encoders = {col: LabelEncoder() for col in all_mappings}
+        for col, mappings in all_mappings.items():
+            encoders[col].label_to_idx = mappings['label_to_idx']
+            encoders[col].idx_to_label = mappings['idx_to_label']
+        return encoders
 
 class CustomDataset(Dataset):
-    def __init__(self, csv_file, data_dir, transform=None):
+    def __init__(self, csv_file, data_dir, transform=None, save_mappings=False):
         self.data_frame = pd.read_csv(csv_file, on_bad_lines='skip')
         self.data_dir = data_dir
         self.transform = transform
-        self.label_encoder = LabelEncoder(self.data_frame['articleType'])
+
+        for col in ['gender', 'masterCategory', 'subCategory', 'articleType', 'baseColour', 'season', 'usage']:
+            self.data_frame[col] = self.data_frame[col].astype(str)
+
+        self.data_frame = self.data_frame.astype(object).fillna('Unknown')
+
+        self.label_encoders = {col: LabelEncoder() for col in
+                               ['gender', 'masterCategory', 'subCategory', 'articleType', 'baseColour', 'season',
+                                'usage']}
+
+        for col, encoder in self.label_encoders.items():
+            encoder.fit(self.data_frame[col])
+
+        if save_mappings:
+            LabelEncoder.save_all_mappings(self.label_encoders, './label_mappings.json')
+
 
     def __len__(self):
         return len(self.data_frame)
@@ -40,13 +74,17 @@ class CustomDataset(Dataset):
         if self.transform:
             image = self.transform(image)
 
-        label_str = self.data_frame.iloc[idx, 4]
-        label_int = self.label_encoder.encode(label_str)
-        self.label_encoder.save_mapping('label_mapping.json')
-        label_tensor = torch.tensor(label_int, dtype=torch.long)
+        labels = {col: torch.tensor(self.label_encoders[col].encode(self.data_frame.iloc[idx][col]), dtype=torch.long)
+                  for col in self.label_encoders}
 
-        return image, label_tensor
+        return image, labels
 
+def get_num_classes(data_frame):
+    num_classes_dict = {}
+    for col in ['gender', 'masterCategory', 'subCategory', 'articleType', 'baseColour', 'season', 'usage']:
+        num_classes = data_frame[col].nunique()
+        num_classes_dict[col] = num_classes
+    return num_classes_dict
 
 def data_loader(csv_file,
                 data_dir,
@@ -65,7 +103,6 @@ def data_loader(csv_file,
         transforms.ToTensor(),
         normalize,
     ])
-
 
     if test:
         test_dataset = CustomDataset(csv_file=csv_file, data_dir=data_dir, transform=transform)
@@ -90,4 +127,3 @@ def data_loader(csv_file,
     valid_loader = DataLoader(full_dataset, batch_size=batch_size, sampler=valid_sampler)
 
     return train_loader, valid_loader
-
