@@ -4,6 +4,10 @@ from PIL import Image
 from data import CustomDataset, get_num_classes
 from model import EfficientNetB0
 import json
+import argparse
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def load_model(model_path, num_classes_dict):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -11,6 +15,7 @@ def load_model(model_path, num_classes_dict):
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
     return model
+
 
 def transform_image(image_path):
     normalize = transforms.Normalize(
@@ -25,15 +30,18 @@ def transform_image(image_path):
     image = Image.open(image_path).convert('RGB')
     return transform(image).unsqueeze(0)
 
+
 def load_label_mappings(mapping_file_path):
     with open(mapping_file_path, 'r') as file:
         return json.load(file)
+
 
 def decode_predictions(predictions, label_mappings):
     decoded = {}
     for key, value in predictions.items():
         decoded[key] = label_mappings[key]['idx_to_label'][str(value)]
     return decoded
+
 
 def predict(image_path, model, num_classes_dict, label_mappings):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -43,16 +51,28 @@ def predict(image_path, model, num_classes_dict, label_mappings):
         predictions = {col: torch.argmax(outputs[col], dim=1).item() for col in num_classes_dict}
     return decode_predictions(predictions, label_mappings)
 
-# Main
+def parse_args():
+    parser = argparse.ArgumentParser(description='Image Classification')
+    parser.add_argument('image_path', type=str, help='Path to the image file')
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    dataset = CustomDataset(csv_file='styles.csv', data_dir='/workspace/digital-wardrobe-recommendation')
-    num_classes_dict = get_num_classes(dataset.data_frame)
+    args = parse_args()
 
-    model_path = './saved_models/efficientnet_multioutput_model.pth'
-    model = load_model(model_path, num_classes_dict)
+    if not os.path.isfile(args.image_path):
+        print("File does not exist. Please enter a valid path.")
+    else:
+        csv_file_path = os.path.join(BASE_DIR, 'styles.csv')
+        model_path = os.path.join(BASE_DIR, 'saved_models', 'efficientnet_multioutput_model.pth')
+        label_mappings_path = os.path.join(BASE_DIR, 'label_mappings.json')
 
-    label_mappings = load_label_mappings('./label_mappings.json')
+        dataset = CustomDataset(csv_file=csv_file_path, data_dir='/workspace/digital-wardrobe-recommendation')
+        num_classes_dict = get_num_classes(dataset.data_frame)
 
-    image_path = './shirt.jpg'
-    predictions = predict(image_path, model, num_classes_dict, label_mappings)
-    print("Decoded Predictions:", predictions)
+        model = load_model(model_path, num_classes_dict)
+
+        label_mappings = load_label_mappings(label_mappings_path)
+
+        predictions = predict(args.image_path, model, num_classes_dict, label_mappings)
+        print("Decoded Predictions:", predictions)

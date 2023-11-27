@@ -7,7 +7,6 @@ from torchvision import transforms
 import numpy as np
 import json
 
-
 class LabelEncoder:
     def __init__(self):
         self.label_to_idx = {}
