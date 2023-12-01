@@ -1,14 +1,18 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from conversation import get_default_conv_template
+from nlp.conversation import get_default_conv_template
 
-tokenizer = AutoTokenizer.from_pretrained("GeneZC/MiniChat-3B", use_fast=False, legacy=False)
-model = AutoModelForCausalLM.from_pretrained("GeneZC/MiniChat-3B", use_cache=True, device_map="auto",
-                                             torch_dtype=torch.float16).eval()
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-conv = get_default_conv_template("minichat")
+def setup_chatbot():
+    tokenizer = AutoTokenizer.from_pretrained("GeneZC/MiniChat-3B", use_fast=False, legacy=False)
+    model = AutoModelForCausalLM.from_pretrained("GeneZC/MiniChat-3B", use_cache=True, device_map="auto",
+                                                 torch_dtype=torch.float16).eval()
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    return tokenizer, model, device
+
+tokenizer, model, device = setup_chatbot()
 
 def generate_response(question):
+    conv = get_default_conv_template("minichat")
     conv.append_message(conv.roles[0], question)
     conv.append_message(conv.roles[1], None)
 
@@ -26,7 +30,3 @@ def generate_response(question):
     output = tokenizer.decode(output_ids, skip_special_tokens=True).strip()
 
     return output
-
-question = "Do you like memes?"
-response = generate_response(question)
-print(response)
