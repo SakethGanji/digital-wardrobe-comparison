@@ -7,7 +7,7 @@ def create_bar(height, width, color):
     red, green, blue = int(color[2]), int(color[1]), int(color[0])
     return bar, (red, green, blue)
 
-img = cv2.imread('./shirt.jpg')
+img = cv2.imread('./modified_wardrobe/2.png')
 height, width, _ = np.shape(img)
 
 data = np.reshape(img, (height * width, 3))

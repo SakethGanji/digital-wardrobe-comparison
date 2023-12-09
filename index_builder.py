@@ -1,81 +1,111 @@
-import os
-import numpy as np
 import faiss
-
+import os
+import torch
+import numpy as np
+from torchvision import transforms
+from PIL import Image
+from sklearn.decomposition import PCA
 from data import CustomDataset, get_num_classes
-from predict import load_model, load_label_mappings, predict
+from model import load_model
+import joblib
+from rembg import remove
+import pyheif
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-csv_file_path = os.path.join(BASE_DIR, 'styles.csv')
-model_path = os.path.join(BASE_DIR, 'saved_models', 'efficientnet_multioutput_model.pth')
-label_mappings_path = os.path.join(BASE_DIR, 'label_mappings.json')
+def remove_background(input_path, output_path):
+    input_image = Image.open(input_path)
+    output_image = remove(input_image)
 
-dataset = CustomDataset(csv_file=csv_file_path, data_dir='/workspace/digital-wardrobe-recommendation')
-num_classes_dict = get_num_classes(dataset.data_frame)
-model = load_model(model_path, num_classes_dict)
-label_mappings = load_label_mappings(label_mappings_path)
+    if output_image.mode == 'RGBA':
+        output_image = output_image.convert('RGB')
 
+    output_image.save(output_path)
 
-def extract_features(image_path):
-    if not image_path:
-        return {"error": "Please provide an 'image_path' field in the request body."}
+def read_heic_image(image_path):
+    heif_file = pyheif.read(image_path)
+    return Image.frombytes(
+        heif_file.mode,
+        heif_file.size,
+        heif_file.data,
+        "raw",
+        heif_file.mode,
+        heif_file.stride,
+    )
 
-    if not os.path.isfile(image_path):
-        return {"error": "File does not exist. Please enter a valid path."}
+def convert_to_jpg(input_path, output_path):
+    if input_path.lower().endswith('.heic'):
+        input_image = read_heic_image(input_path)
+    else:
+        input_image = Image.open(input_path)
+    input_image.convert('RGB').save(output_path, 'JPEG')
 
-    predictions = predict(image_path, model, num_classes_dict, label_mappings)
-
-    return predictions
-
-
-def one_hot_encode(feature, categories):
-    vector = np.zeros(len(categories), dtype='float32')
-    if feature in categories:
-        vector[categories.index(feature)] = 1.0
-    return vector
-
-
-gender_categories = ['Men', 'Women', 'Unisex', 'Boys', 'Girls']
-master_category_categories = ['Apparel', 'Footwear', 'Accessories', 'Home', 'Personal Care', 'Sporting Goods']
-sub_category_categories = ['Topwear', 'Bottomwear', 'Footwear', 'Accessories', 'Bags', 'Belts', 'Cufflinks', 'Eyewear',
-                           'Headwear', 'Scarves', 'Socks', 'Ties', 'Wallets', 'Watches']
-article_type_categories = ['Tshirts', 'Shirts', 'Jeans', 'Dresses', 'Trousers', 'Skirts', 'Sweaters', 'Jackets',
-                           'Blazers', 'Shorts', 'Tracksuits']
-base_colour_categories = ['Blue', 'Black', 'White', 'Red', 'Green', 'Yellow', 'Purple', 'Pink', 'Orange', 'Brown',
-                          'Grey', 'Beige', 'Maroon']
-season_categories = ['Summer', 'Fall', 'Winter', 'Spring']
-usage_categories = ['Casual', 'Sports', 'Formal', 'Ethnic', 'Party', 'Home', 'Travel', 'Smart Casual']
-
-
-def vectorize_features(features):
-    vectors = []
-    vectors.extend(one_hot_encode(features['gender'], gender_categories))
-    vectors.extend(one_hot_encode(features['masterCategory'], master_category_categories))
-    vectors.extend(one_hot_encode(features['subCategory'], sub_category_categories))
-    vectors.extend(one_hot_encode(features['articleType'], article_type_categories))
-    vectors.extend(one_hot_encode(features['baseColour'], base_colour_categories))
-    vectors.extend(one_hot_encode(features['season'], season_categories))
-    vectors.extend(one_hot_encode(features['usage'], usage_categories))
-    return np.array(vectors, dtype='float32')
-
-
-dimension = len(gender_categories) + len(master_category_categories) + len(sub_category_categories) + len(
-    article_type_categories) + len(base_colour_categories) + len(season_categories) + len(usage_categories)
-
-index = faiss.IndexFlatL2(dimension)
 
 image_directory = "./wardrobe"
-image_ids = []
-image_paths = [os.path.join(image_directory, filename) for filename in os.listdir(image_directory) if
-               filename.endswith(('.png', '.jpg', '.jpeg'))]
+jpg_directory = "./wardrobe_jpg"
+os.makedirs(jpg_directory, exist_ok=True)
 
-for i, image_path in enumerate(image_paths):
-    features = extract_features(image_path)
-    vector = vectorize_features(features)
-    index.add(np.array([vector]))
-    image_ids.append((i, image_path))
+for img_file in os.listdir(image_directory):
+    if img_file.lower().endswith(('.png', '.jpg', '.jpeg', '.heic')):
+        original_path = os.path.join(image_directory, img_file)
+        jpg_path = os.path.join(jpg_directory, os.path.splitext(img_file)[0] + '.jpg')
+        convert_to_jpg(original_path, jpg_path)
 
-faiss.write_index(index, "wardrobe_index.faiss")
-with open("image_ids.txt", "w") as f:
-    for id, path in image_ids:
-        f.write(f"{id},{path}\n")
+image_directory = jpg_directory
+modified_image_directory = "./modified_wardrobe"
+os.makedirs(modified_image_directory, exist_ok=True)
+
+for img_file in os.listdir(image_directory):
+    if img_file.endswith(('.png', '.jpg', '.jpeg')):
+        original_path = os.path.join(image_directory, img_file)
+        modified_path = os.path.join(modified_image_directory, img_file)
+        remove_background(original_path, modified_path)
+
+dataset = CustomDataset(csv_file='styles.csv', data_dir='/workspace/digital-wardrobe-recommendation', save_mappings=True)
+num_classes_dict = get_num_classes(dataset.data_frame)
+path = "./saved_models/efficientnet_multioutput_model.pth"
+model = load_model(path, num_classes_dict)
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model.to(device)
+
+def process_image(image_path):
+    normalize = transforms.Normalize(
+        mean=[0.4914, 0.4822, 0.4465],
+        std=[0.2023, 0.1994, 0.2010],
+    )
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        normalize,
+    ])
+    image = Image.open(image_path).convert('RGB')
+    return transform(image).unsqueeze(0)
+
+index = faiss.IndexFlatL2(128)
+
+features_list = []
+for img_file in os.listdir(modified_image_directory):
+    if img_file.endswith('.jpg'):
+        img_path = os.path.join(modified_image_directory, img_file)
+        image = process_image(img_path)
+        image = image.to(device)
+        with torch.no_grad():
+            feature = model.get_feature_vector(image).cpu().numpy()
+        features_list.append(feature[0])
+
+features_array = np.array(features_list)
+
+num_samples, num_features = features_array.shape
+n_components = min(num_samples, num_features, 128)
+
+pca = PCA(n_components=n_components)
+reduced_features = pca.fit_transform(features_array)
+reduced_features = np.ascontiguousarray(reduced_features)
+
+faiss.normalize_L2(reduced_features)
+
+index = faiss.IndexFlatL2(n_components)
+
+index.add(reduced_features)
+
+faiss.write_index(index, 'wardrobe_index.index')
+np.save('pca_components.npy', pca.components_)
+joblib.dump(pca, 'pca_model.joblib')

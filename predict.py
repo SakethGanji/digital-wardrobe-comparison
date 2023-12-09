@@ -39,7 +39,8 @@ def load_label_mappings(mapping_file_path):
 def decode_predictions(predictions, label_mappings):
     decoded = {}
     for key, value in predictions.items():
-        decoded[key] = label_mappings[key]['idx_to_label'][str(value)]
+        if key != 'season':
+            decoded[key] = label_mappings[key]['idx_to_label'][str(value)]
     return decoded
 
 

@@ -7,7 +7,7 @@ from data import data_loader, CustomDataset, get_num_classes
 dataset = CustomDataset(csv_file='styles.csv', data_dir='/workspace/digital-wardrobe-recommendation', save_mappings=True)
 num_classes_dict = get_num_classes(dataset.data_frame)
 
-num_epochs = 40
+num_epochs = 30
 batch_size = 32
 learning_rate = 0.001
 

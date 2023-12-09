@@ -1,0 +1,13 @@
+0,./wardrobe/shorts.jpg
+1,./wardrobe/IMG_6355.jpg
+2,./wardrobe/IMG_6357.jpg
+3,./wardrobe/IMG_6351.jpg
+4,./wardrobe/IMG_6354.jpg
+5,./wardrobe/shirt.jpg
+6,./wardrobe/IMG_6360.jpg
+7,./wardrobe/IMG_6361.jpg
+8,./wardrobe/IMG_6353.jpg
+9,./wardrobe/shirt2.jpg
+10,./wardrobe/IMG_6358.jpg
+11,./wardrobe/pants.jpg
+12,./wardrobe/pants3.jpg

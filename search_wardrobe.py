@@ -1,82 +1,58 @@
-import numpy as np
 import faiss
-import sys
+import torch
+import numpy as np
+from torchvision import transforms
+from PIL import Image
+import joblib
+import os
 
-from index_builder import *
-from nlp.mini_chat_3b import *
+from data import CustomDataset, get_num_classes
+from model import EfficientNetB0, load_model
 
-def one_hot_encode(feature, categories):
-    vector = np.zeros(len(categories), dtype='float32')
-    if feature in categories:
-        vector[categories.index(feature)] = 1.0
-    return vector
+dataset = CustomDataset(csv_file='styles.csv', data_dir='/workspace/digital-wardrobe-recommendation', save_mappings=True)
+num_classes_dict = get_num_classes(dataset.data_frame)
 
-def vectorize_features(features):
+path = "./saved_models/efficientnet_multioutput_model.pth"
+model = load_model(path, num_classes_dict)
+model.to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
 
-    vectors = []
-    vectors.extend(one_hot_encode(features['gender'], gender_categories))
-    vectors.extend(one_hot_encode(features['masterCategory'], master_category_categories))
-    vectors.extend(one_hot_encode(features['subCategory'], sub_category_categories))
-    vectors.extend(one_hot_encode(features['articleType'], article_type_categories))
-    vectors.extend(one_hot_encode(features['baseColour'], base_colour_categories))
-    vectors.extend(one_hot_encode(features['season'], season_categories))
-    vectors.extend(one_hot_encode(features['usage'], usage_categories))
-    return np.array(vectors, dtype='float32')
+pca = joblib.load('pca_model.joblib')
+faiss_index = faiss.read_index('wardrobe_index.index')
 
+modified_wardrobe_dir = './modified_wardrobe'
+wardrobe_filenames = [f for f in os.listdir(modified_wardrobe_dir) if f.endswith('.jpg')]
 
-def is_category_compatible(item1, item2):
-    return item1['subCategory'] != item2['subCategory']
+def process_image(image_path):
+    normalize = transforms.Normalize(
+        mean=[0.4914, 0.4822, 0.4465],
+        std=[0.2023, 0.1994, 0.2010],
+    )
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        normalize,
+    ])
+    image = Image.open(image_path).convert('RGB')
+    return transform(image).unsqueeze(0)
 
-index = faiss.read_index("wardrobe_index.faiss")
-image_ids = []
-with open("image_ids.txt", "r") as f:
-    for line in f:
-        id, path = line.strip().split(',')
-        image_ids.append((int(id), path))
+def search_wardrobe(image_path, k=5, threshold=None):
+    image = process_image(image_path)
+    image = image.to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+    with torch.no_grad():
+        feature = model.get_feature_vector(image).cpu().numpy()
 
-def search(query, k=10):
-    query_features = interpret_query(query)
-    query_vector = vectorize_features(query_features)
-    D, I = index.search(np.array([query_vector]), k)
-    return [image_ids[i] for i in I[0]]
+    reduced_feature = pca.transform(feature)
+    faiss.normalize_L2(reduced_feature)
 
-def interpret_query(query):
-    response = generate_response(query)
+    distances, indices = faiss_index.search(reduced_feature.astype('float32'), k)
 
-    features = {
-        'gender': 'Unisex',
-        'masterCategory': 'Apparel',
-        'subCategory': 'Topwear',
-        'articleType': 'Tshirts',
-        'baseColour': 'Black',
-        'season': 'Summer',
-        'usage': 'Casual',
-    }
+    results = []
+    for distance, idx in zip(distances[0], indices[0]):
+        if threshold is None or distance < threshold:
+            match = {
+                'filename': wardrobe_filenames[idx],
+                'distance': distance
+            }
+            results.append(match)
 
-    return features
-
-def combine_items_into_outfits(search_results):
-    outfits = []
-    processed_combinations = set()
-
-    for i in range(len(search_results)):
-        for j in range(i + 1, len(search_results)):
-            combination = (search_results[i], search_results[j])
-
-            if combination in processed_combinations:
-                continue
-
-            item1 = extract_features(search_results[i][1])
-            item2 = extract_features(search_results[j][1])
-
-            if is_category_compatible(item1, item2):
-                outfits.append(combination)
-                processed_combinations.add(combination)
-
-    return outfits
-
-
-query = "I need an outfit for my presentation"
-search_results = search(query)
-combined_outfits = combine_items_into_outfits(search_results)
-print("Combined Outfits:", combined_outfits)
+    return results
